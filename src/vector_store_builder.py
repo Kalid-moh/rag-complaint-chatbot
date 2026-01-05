@@ -2,10 +2,12 @@
 import pandas as pd
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_chroma import Chroma  # This wrapper requires 'chromadb' to be installed
+from langchain_community.vectorstores import Chroma
 from langchain_core.documents import Document
 from pathlib import Path
-from .config import FILTERED_CSV, VECTOR_STORE_DIR
+from .settings import FILTERED_CSV, VECTOR_STORE_DIR
+
+
 
 
 class SampleVectorStoreBuilder:

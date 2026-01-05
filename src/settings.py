@@ -6,6 +6,8 @@ DATA_DIR = PROJECT_ROOT / "data"
 RAW_DIR = DATA_DIR / "raw"
 PROCESSED_DIR = DATA_DIR / "processed"
 NOTEBOOKS_DIR = PROJECT_ROOT / "notebooks"
+# Vector store directory
+VECTOR_STORE_DIR = PROJECT_ROOT / "vector_store"
 
 ZIP_URL = "https://files.consumerfinance.gov/ccdb/complaints.csv.zip"
 ZIP_PATH = RAW_DIR / "complaints.csv.zip"
