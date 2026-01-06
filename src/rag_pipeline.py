@@ -57,9 +57,12 @@ class CrediTrustRAG:
 
         # Prompt
         self.prompt = PromptTemplate.from_template(
-            """You are a financial analyst assistant for CrediTrust Financial in East Africa.
-Use only the provided complaint excerpts to answer the question. Be concise and evidence-based.
-If the context lacks information, say "Not enough information in complaints."
+    """You are a financial analyst assistant for CrediTrust Financial in East Africa.
+Use only the provided complaint excerpts to answer the question.
+Be concise, factual, and evidence-based.
+
+Conversation History:
+{chat_history}
 
 Context:
 {context}
@@ -67,7 +70,8 @@ Context:
 Question: {question}
 
 Answer:"""
-        )
+)
+
 
         def format_docs(docs):
             return "\n\n".join(
@@ -76,25 +80,41 @@ Answer:"""
             )
 
         # RAG chain
-        self.chain = (
-            {"context": self.retriever | format_docs, "question": RunnablePassthrough()}
-            | self.prompt
-            | self.llm
-            | StrOutputParser()
-        )
+    self.chain = (
+    {
+        "context": self.retriever | format_docs,
+        "question": RunnablePassthrough(),
+        "chat_history": RunnablePassthrough()
+    }
+    | self.prompt
+    | self.llm
+    | StrOutputParser()
+)
 
-    def ask(self, question: str):
-        answer = self.chain.invoke(question)
-        docs = self.retriever.invoke(question)
-        sources = [
-            {
-                "complaint_id": doc.metadata.get("complaint_id", "unknown"),
-                "product_category": doc.metadata.get("product_category", "unknown"),
-                "text_preview": doc.page_content[:200] + "..."
-            }
-            for doc in docs
-        ]
-        return answer.strip(), sources
+
+  def ask(self, question: str, chat_history=None):
+    if chat_history is None:
+        chat_history = ""
+
+    answer = self.chain.invoke(
+        {
+            "question": question,
+            "chat_history": chat_history
+        }
+    )
+
+    docs = self.retriever.invoke(question)
+    sources = [
+        {
+            "complaint_id": doc.metadata.get("complaint_id", "unknown"),
+            "product_category": doc.metadata.get("product_category", "unknown"),
+            "text_preview": doc.page_content[:200] + "..."
+        }
+        for doc in docs
+    ]
+
+    return answer.strip(), sources
+
 
     def evaluate(self, questions):
         print("=== RAG Qualitative Evaluation ===\n")
