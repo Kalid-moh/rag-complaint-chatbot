@@ -7,7 +7,7 @@ import zipfile
 from pathlib import Path
 import warnings
 
-from src.settings import (
+from config import (
     RAW_CSV, ZIP_URL, ZIP_PATH, FILTERED_CSV, WORD_COUNT_PLOT,
     RAW_DIR, PROCESSED_DIR, NOTEBOOKS_DIR,
     RELEVANT_CFPB_PRODUCTS, PRODUCT_MAPPING
@@ -50,65 +50,57 @@ class CFPBDataProcessor:
             raise RuntimeError(f"Download failed: {e}")
 
     def load_data(self):
-                if self.filtered_df is not None:
-                     print("Filtered data already loaded.")
-                     return self
+        if self.filtered_df is not None:
+            print("Filtered data already loaded.")
+            return self
 
-    if not RAW_CSV.exists():
-        raise FileNotFoundError(f"Raw CSV not found. Run download_dataset() first.")
+        if not RAW_CSV.exists():
+            raise FileNotFoundError(f"Raw CSV not found. Run download_dataset() first.")
 
-    print("Starting memory-safe chunked loading...")
+        print("Starting memory-safe chunked loading...")
 
-    required_cols = [
-        'Product',
-        'Consumer complaint narrative',
-        'Complaint ID',
-        'Date received',
-        'Issue'
-    ]
+        required_cols = [
+            'Product',
+            'Consumer complaint narrative',
+            'Complaint ID',
+            'Date received',
+            'Issue'
+        ]
 
-    chunksize = 100_000
-    filtered_chunks = []
+        chunksize = 100_000
+        filtered_chunks = []
 
-    self.total_complaints = 0
-    self.total_with_narrative = 0
+        self.total_complaints = 0
+        self.total_with_narrative = 0
 
-    # ✅ Indent the try inside the method
-    try:
-        for i, chunk in enumerate(pd.read_csv(
-            RAW_CSV,
-            usecols=required_cols,
-            chunksize=chunksize,
-            dtype=str,
-            engine='python',        # safer parser
-            on_bad_lines='skip',    # skip malformed lines
-            low_memory=True          # reduces memory footprint
-        )):
-            self.total_complaints += len(chunk)
+        try:
+            for i, chunk in enumerate(pd.read_csv(
+                RAW_CSV,
+                usecols=required_cols,
+                chunksize=chunksize,
+                engine='python',
+                on_bad_lines='skip',
+                dtype=str
+            )):
+                self.total_complaints += len(chunk)
 
-            # Check which rows have narratives
-            narrative = chunk['Consumer complaint narrative']
-            has_narrative = narrative.notna() & (narrative.str.strip() != '')
-            self.total_with_narrative += has_narrative.sum()
+                narrative = chunk['Consumer complaint narrative']
+                has_narrative = narrative.notna() & (narrative.str.strip() != '')
+                self.total_with_narrative += has_narrative.sum()
 
-            # Filter only relevant products and rows with narrative
-            mask = chunk['Product'].isin(RELEVANT_CFPB_PRODUCTS) & has_narrative
-            filtered = chunk[mask].copy()
+                mask = chunk['Product'].isin(RELEVANT_CFPB_PRODUCTS) & has_narrative
+                filtered = chunk[mask].copy()
+                if not filtered.empty:
+                    filtered_chunks.append(filtered)
 
-            if not filtered.empty:
-                filtered_chunks.append(filtered)
+                print(f"Chunk {i+1} processed | Filtered so far: {sum(len(c) for c in filtered_chunks):,}")
 
-            print(f"Chunk {i+1} processed | Filtered so far: {sum(len(c) for c in filtered_chunks):,}")
+            self.filtered_df = pd.concat(filtered_chunks, ignore_index=True) if filtered_chunks else pd.DataFrame()
+            print(f"\nLoaded & filtered {len(self.filtered_df):,} relevant complaints")
+            return self
 
-        # Combine all filtered chunks at the end
-        self.filtered_df = pd.concat(filtered_chunks, ignore_index=True) if filtered_chunks else pd.DataFrame()
-        print(f"\nLoaded & filtered {len(self.filtered_df):,} relevant complaints")
-        return self
-
-    except Exception as e:
-        raise RuntimeError(f"Failed to load CSV: {e}")
-
-
+        except Exception as e:
+            raise RuntimeError(f"Loading failed: {e}")
 
     def perform_eda(self):
         if self.filtered_df is None or self.filtered_df.empty:

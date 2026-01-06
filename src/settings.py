@@ -6,6 +6,14 @@ DATA_DIR = PROJECT_ROOT / "data"
 RAW_DIR = DATA_DIR / "raw"
 PROCESSED_DIR = DATA_DIR / "processed"
 NOTEBOOKS_DIR = PROJECT_ROOT / "notebooks"
+# Base directory of the project
+BASE_DIR = Path(__file__).parent
+
+# Path to your vector store directory
+VECTOR_STORE_DIR = BASE_DIR / "vector_store"
+
+# Path to your prebuilt parquet file
+PREBUILT_PARQUET = BASE_DIR / "prebuilt.parquet"
 
 ZIP_URL = "https://files.consumerfinance.gov/ccdb/complaints.csv.zip"
 ZIP_PATH = RAW_DIR / "complaints.csv.zip"
