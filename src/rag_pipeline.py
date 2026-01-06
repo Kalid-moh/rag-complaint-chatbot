@@ -1,43 +1,52 @@
 # src/rag_pipeline.py
-from langchain_chroma import Chroma
-from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_core.prompts import PromptTemplate
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.runnables import RunnablePassthrough
-from langchain_huggingface import HuggingFaceEndpoint
+
 from pathlib import Path
 from config import PREBUILT_PARQUET, VECTOR_STORE_DIR
 
+# LangChain imports (latest)
+from langchain.vectorstores import Chroma
+from langchain.embeddings import HuggingFaceEmbeddings
+from langchain.prompts import PromptTemplate
+from langchain.output_parsers import StrOutputParser
+from langchain.schema import Document
+from langchain.runnable import RunnablePassthrough
+from langchain_huggingface import HuggingFaceEndpoint
+
+
 class CrediTrustRAG:
-    def __init__(self, top_k=5):
-        self.embedding_model = "sentence-transformers/all-MiniLM-L6-v2"
-        self.embeddings = HuggingFaceEmbeddings(model_name=self.embedding_model)
+    """
+    RAG pipeline for CrediTrust financial complaints
+    """
+    def __init__(self, top_k: int = 5):
         self.top_k = top_k
 
-        # Define paths
+        # Embeddings
+        self.embedding_model = "sentence-transformers/all-MiniLM-L6-v2"
+        self.embeddings = HuggingFaceEmbeddings(model_name=self.embedding_model)
+
+        # Vector store paths
         full_store_path = VECTOR_STORE_DIR / "full_prebuilt"
         sample_store_path = VECTOR_STORE_DIR / "sample_chroma"
 
-        # Determine which store to use
         if PREBUILT_PARQUET.exists():
             if full_store_path.exists():
                 print("Loading full pre-built vector store...")
                 store_path = full_store_path
             else:
-                print("Pre-built parquet file found, but full vector store not yet built.")
-                print("Please run: python src/load_prebuilt.py first to create the full store.")
+                print("Pre-built parquet found, but full store not built.")
                 print("Falling back to sample store for now.")
                 store_path = sample_store_path
         else:
-            print("Pre-built parquet file not found.")
-            print("Using sample vector store from Task 2.")
+            print("Pre-built parquet not found. Using sample store.")
             store_path = sample_store_path
 
-        # Final check
         if not store_path.exists():
-            raise FileNotFoundError(f"Vector store not found at {store_path}. Run Task 2 or load_prebuilt.py first.")
+            raise FileNotFoundError(
+                f"Vector store not found at {store_path}. "
+                f"Run Task 2 or load_prebuilt.py first."
+            )
 
-        # Load the selected store
+        # Load Chroma vector store
         self.db = Chroma(
             persist_directory=str(store_path),
             embedding_function=self.embeddings,
@@ -47,17 +56,17 @@ class CrediTrustRAG:
 
         self.retriever = self.db.as_retriever(search_kwargs={"k": self.top_k})
 
-        # LLM - free Hugging Face Inference API
+        # Hugging Face Inference API LLM
         repo_id = "mistralai/Mistral-7B-Instruct-v0.2"
         self.llm = HuggingFaceEndpoint(
             repo_id=repo_id,
             temperature=0.3,
-            max_new_tokens=512,
+            max_new_tokens=512
         )
 
-        # Prompt
+        # Prompt template
         self.prompt = PromptTemplate.from_template(
-    """You are a financial analyst assistant for CrediTrust Financial in East Africa.
+            """You are a financial analyst assistant for CrediTrust Financial in East Africa.
 Use only the provided complaint excerpts to answer the question.
 Be concise, factual, and evidence-based.
 
@@ -70,53 +79,47 @@ Context:
 Question: {question}
 
 Answer:"""
-)
+        )
 
-
-        def format_docs(docs):
+        # Function to format retrieved docs
+        def format_docs(docs: list[Document]):
             return "\n\n".join(
                 f"[{i+1}] (Product: {doc.metadata.get('product_category', 'Unknown')}) {doc.page_content}"
                 for i, doc in enumerate(docs)
             )
 
         # RAG chain
-    self.chain = (
-    {
-        "context": self.retriever | format_docs,
-        "question": RunnablePassthrough(),
-        "chat_history": RunnablePassthrough()
-    }
-    | self.prompt
-    | self.llm
-    | StrOutputParser()
-)
+        self.chain = (
+            {
+                "context": self.retriever | format_docs,
+                "question": RunnablePassthrough(),
+                "chat_history": RunnablePassthrough()
+            }
+            | self.prompt
+            | self.llm
+            | StrOutputParser()
+        )
 
+    def ask(self, question: str):
+        """
+        Ask a question to the RAG system and return the answer and source metadata.
+        """
+        answer = self.chain.invoke(question)
+        docs = self.retriever.invoke(question)
+        sources = [
+            {
+                "complaint_id": doc.metadata.get("complaint_id", "unknown"),
+                "product_category": doc.metadata.get("product_category", "unknown"),
+                "text_preview": doc.page_content[:200] + "..."
+            }
+            for doc in docs
+        ]
+        return answer.strip(), sources
 
-  def ask(self, question: str, chat_history=None):
-    if chat_history is None:
-        chat_history = ""
-
-    answer = self.chain.invoke(
-        {
-            "question": question,
-            "chat_history": chat_history
-        }
-    )
-
-    docs = self.retriever.invoke(question)
-    sources = [
-        {
-            "complaint_id": doc.metadata.get("complaint_id", "unknown"),
-            "product_category": doc.metadata.get("product_category", "unknown"),
-            "text_preview": doc.page_content[:200] + "..."
-        }
-        for doc in docs
-    ]
-
-    return answer.strip(), sources
-
-
-    def evaluate(self, questions):
+    def evaluate(self, questions: list[str]):
+        """
+        Simple evaluation utility for testing multiple questions
+        """
         print("=== RAG Qualitative Evaluation ===\n")
         table = "| Question | Answer Summary | Sources (Top 2) | Quality | Comments |\n"
         table += "|---|---|---|---|---|\n"
@@ -130,6 +133,22 @@ Answer:"""
         print("\nEvaluation Table (Markdown):\n")
         print(table)
 
+
+# ----------------------------
+# Helper function for app.py
+# ----------------------------
+_rag_instance = CrediTrustRAG(top_k=5)
+
+def ask_rag(question: str, chat_history=None):
+    """
+    Simple wrapper to call the RAG system from app.py
+    """
+    return _rag_instance.ask(question)
+
+
+# ----------------------------
+# Standalone test
+# ----------------------------
 if __name__ == "__main__":
     rag = CrediTrustRAG(top_k=5)
 

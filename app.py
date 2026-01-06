@@ -1,54 +1,71 @@
+# app.py
 import gradio as gr
 import time
-from src.rag_pipeline import CrediTrustRAG
+# Inside src/rag_pipeline.py
+# src/rag_pipeline.py
+from src.settings import PREBUILT_PARQUET, VECTOR_STORE_DIR
 
-rag = CrediTrustRAG(top_k=5)
 
-def format_history(chat_history):
-    return "\n".join(
-        [f"User: {q}\nAssistant: {a}" for q, a in chat_history]
-    )
 
+
+# ----------------------------
+# Streaming generator
+# ----------------------------
 def stream_answer(question, chat_history):
+    """
+    Streams tokens from RAG while keeping chat history
+    """
     if not question.strip():
         yield chat_history, ""
 
-    history_text = format_history(chat_history)
+    # Call RAG system
+    answer, sources = ask_rag(question, chat_history)
 
-    answer, sources = rag.ask(question, history_text)
-
-    streamed = ""
+    streamed_text = ""
+    # Stream word by word (simulate typing)
     for token in answer.split():
-        streamed += token + " "
-        time.sleep(0.03)
-        yield chat_history + [(question, streamed)], ""
+        streamed_text += token + " "
+        time.sleep(0.03)  # Adjust speed as needed
+        # Update chat with current partial answer
+        yield chat_history + [(question, streamed_text)], ""
 
-    # Append sources
-    sources_md = "\n\n### 📚 Sources Used\n"
-    for i, s in enumerate(sources, 1):
-        sources_md += (
-            f"**{i}. Product:** {s['product_category']}  \n"
-            f"**Complaint ID:** {s['complaint_id']}  \n"
-            f"> {s['text_preview']}\n\n"
-        )
+    # Append sources at the end
+    if sources:
+        sources_text = "\n\n### 📚 Sources Used:\n"
+        for i, src in enumerate(sources, 1):
+            sources_text += (
+                f"**Source {i}:** Complaint ID: {src['complaint_id']}, "
+                f"Product: {src['product_category']}\n"
+                f"{src['text_preview']}\n\n"
+            )
+        final_answer = streamed_text + sources_text
+    else:
+        final_answer = streamed_text
 
-    final_answer = streamed + sources_md
+    # Final yield with sources appended
     yield chat_history + [(question, final_answer)], ""
 
+
+# ----------------------------
+# Clear chat
+# ----------------------------
 def clear_chat():
     return [], ""
 
-with gr.Blocks(title="CrediTrust RAG Assistant") as demo:
-    gr.Markdown("# 🤖 CrediTrust Complaint Analysis Assistant")
+
+# ----------------------------
+# Gradio UI
+# ----------------------------
+with gr.Blocks(title="RAG Chat Assistant") as demo:
+    gr.Markdown("# 🤖 RAG-Powered Chat Assistant")
     gr.Markdown(
-        "Ask questions about customer complaints. "
-        "Answers are **retrieval-augmented and source-verified**."
+        "Ask questions and get **source-backed answers** from your documents."
     )
 
-    chatbot = gr.Chatbot(height=420)
+    chatbot = gr.Chatbot(height=400)
     question_box = gr.Textbox(
-        label="Ask a Question",
-        placeholder="e.g. Why are customers unhappy with credit cards?",
+        label="Your Question",
+        placeholder="Ask something...",
         lines=2
     )
 
@@ -56,6 +73,7 @@ with gr.Blocks(title="CrediTrust RAG Assistant") as demo:
         ask_btn = gr.Button("Ask")
         clear_btn = gr.Button("Clear")
 
+    # Button click events
     ask_btn.click(
         stream_answer,
         inputs=[question_box, chatbot],
@@ -67,4 +85,5 @@ with gr.Blocks(title="CrediTrust RAG Assistant") as demo:
         outputs=[chatbot, question_box]
     )
 
+# Launch the app
 demo.launch()
